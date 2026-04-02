@@ -751,9 +751,6 @@ static void flexcan_write(void *opaque, hwaddr offset,
                                    FDCTRL_TDCOFF_MASK;
             s->fdctrl = (s->fdctrl & ~(runtime | freeze_only)) |
                         (v & (runtime | freeze_only));
-            if (!(s->mcr & MCR_FDEN)) {
-                s->fdctrl &= ~FDCTRL_MBDSR0_MASK;
-            }
         } else {
             s->fdctrl = (s->fdctrl & ~FDCTRL_FDRATE) | (v & FDCTRL_FDRATE);
         }
