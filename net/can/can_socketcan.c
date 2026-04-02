@@ -110,6 +110,7 @@ static void can_host_socketcan_read(void *opaque)
     } else {
         if (c->bufcnt > CAN_MTU) {
             c->buf[0].flags |= QEMU_CAN_FRMF_TYPE_FD;
+            c->buf[0].can_dlc = can_len2dlc(c->buf[0].can_dlc);
         }
     }
 
@@ -130,6 +131,9 @@ static ssize_t can_host_socketcan_receive(CanBusClientState *client,
 {
     CanHostState *ch = container_of(client, CanHostState, bus_client);
     CanHostSocketCAN *c = CAN_HOST_SOCKETCAN(ch);
+    struct canfd_frame fd_frame = { 0 };
+    struct can_frame frame = { 0 };
+    const void *buf;
 
     size_t len;
     int res;
@@ -141,13 +145,22 @@ static ssize_t can_host_socketcan_receive(CanBusClientState *client,
         if (!ch->bus_client.fd_mode) {
             return 0;
         }
+        fd_frame.can_id = frames->can_id;
+        fd_frame.len = can_dlc2len(frames->can_dlc);
+        fd_frame.flags = frames->flags & (QEMU_CAN_FRMF_BRS | QEMU_CAN_FRMF_ESI);
+        memcpy(fd_frame.data, frames->data, fd_frame.len);
+        buf = &fd_frame;
         len = CANFD_MTU;
     } else {
+        frame.can_id = frames->can_id;
+        frame.can_dlc = frames->can_dlc;
+        memcpy(frame.data, frames->data, frame.can_dlc);
+        buf = &frame;
         len = CAN_MTU;
 
     }
 
-    res = write(c->fd, frames, len);
+    res = write(c->fd, buf, len);
 
     if (!res) {
         warn_report("[cansocketcan]: write message to host returns zero");
