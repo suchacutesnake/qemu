@@ -22,12 +22,16 @@ OBJECT_DECLARE_SIMPLE_TYPE(S32K1xxCanMachineState, S32K1XX_CAN_MACHINE)
 #define S32K1XX_FLASH_BASE           0x00000000
 #define S32K1XX_SRAM_BASE            0x1ffe0000
 #define S32K1XX_FLEXCAN0_BASE        0x40024000
+#define S32K1XX_FLEXCAN1_BASE        0x40025000
+#define S32K1XX_FLEXCAN2_BASE        0x4002b000
 #define S32K1XX_WDOG_BASE            0x40052000
 #define S32K1XX_SCG_BASE             0x40064000
 #define S32K1XX_PCC_BASE             0x40065000
 #define S32K1XX_PORTE_BASE           0x4004d000
 #define S32K1XX_PTE_BASE             0x400ff100
 #define S32K1XX_FLEXCAN0_IRQ         81
+#define S32K1XX_FLEXCAN1_IRQ         88
+#define S32K1XX_FLEXCAN2_IRQ         95
 #define S32K1XX_NUM_IRQ              128
 #define S32K1XX_SYSCLK_HZ            80000000ULL
 #define S32K1XX_PCC_REG_COUNT        122
@@ -71,6 +75,8 @@ struct S32K1xxCanMachineState {
     MemoryRegion porte;
     MemoryRegion pte;
     CanBusState *canbus0;
+    CanBusState *canbus1;
+    CanBusState *canbus2;
     uint32_t wdog_cs;
     uint32_t wdog_cnt;
     uint32_t wdog_toval;
@@ -82,6 +88,28 @@ struct S32K1xxCanMachineState {
     uint32_t pte_pdir;
     uint32_t pte_pddr;
 };
+
+static void s32k1xx_realize_flexcan(S32K1xxCanMachineState *s,
+                                    DeviceState *armv7m,
+                                    CanBusState *canbus,
+                                    hwaddr base,
+                                    int irq,
+                                    bool pnet)
+{
+    DeviceState *flexcan = qdev_new("fsl.flexcan");
+    SysBusDevice *sbd;
+
+    qdev_prop_set_bit(flexcan, "pnet", pnet);
+    if (canbus) {
+        object_property_set_link(OBJECT(flexcan), "canbus",
+                                 OBJECT(canbus), &error_abort);
+    }
+
+    sbd = SYS_BUS_DEVICE(flexcan);
+    sysbus_realize(sbd, &error_fatal);
+    sysbus_mmio_map(sbd, 0, base);
+    sysbus_connect_irq(sbd, 0, qdev_get_gpio_in(armv7m, irq));
+}
 
 static uint64_t s32k1xx_wdog_read(void *opaque, hwaddr offset, unsigned size)
 {
@@ -328,8 +356,6 @@ static void s32k1xx_can_init(MachineState *machine)
 {
     S32K1xxCanMachineState *s = S32K1XX_CAN_MACHINE(machine);
     DeviceState *armv7m;
-    DeviceState *flexcan;
-    SysBusDevice *sbd;
     Clock *sysclk;
     MemoryRegion *system_memory = get_system_memory();
 
@@ -380,17 +406,12 @@ static void s32k1xx_can_init(MachineState *machine)
                              OBJECT(system_memory), &error_abort);
     sysbus_realize(SYS_BUS_DEVICE(&s->armv7m), &error_fatal);
 
-    flexcan = qdev_new("fsl.flexcan");
-    if (s->canbus0) {
-        object_property_set_link(OBJECT(flexcan), "canbus",
-                                 OBJECT(s->canbus0), &error_abort);
-    }
-    sbd = SYS_BUS_DEVICE(flexcan);
-    sysbus_realize(sbd, &error_fatal);
-    sysbus_mmio_map(sbd, 0, S32K1XX_FLEXCAN0_BASE);
-    sysbus_connect_irq(sbd, 0,
-                       qdev_get_gpio_in(DEVICE(&s->armv7m),
-                                        S32K1XX_FLEXCAN0_IRQ));
+    s32k1xx_realize_flexcan(s, armv7m, s->canbus0, S32K1XX_FLEXCAN0_BASE,
+                            S32K1XX_FLEXCAN0_IRQ, true);
+    s32k1xx_realize_flexcan(s, armv7m, s->canbus1, S32K1XX_FLEXCAN1_BASE,
+                            S32K1XX_FLEXCAN1_IRQ, false);
+    s32k1xx_realize_flexcan(s, armv7m, s->canbus2, S32K1XX_FLEXCAN2_BASE,
+                            S32K1XX_FLEXCAN2_IRQ, false);
 
     if (machine->kernel_filename) {
         armv7m_load_kernel(ARM_CPU(first_cpu), machine->kernel_filename,
@@ -405,6 +426,14 @@ static void s32k1xx_can_machine_instance_init(Object *obj)
     object_initialize_child(obj, "armv7m", &s->armv7m, TYPE_ARMV7M);
     object_property_add_link(obj, "canbus0", TYPE_CAN_BUS,
                              (Object **)&s->canbus0,
+                             object_property_allow_set_link,
+                             0);
+    object_property_add_link(obj, "canbus1", TYPE_CAN_BUS,
+                             (Object **)&s->canbus1,
+                             object_property_allow_set_link,
+                             0);
+    object_property_add_link(obj, "canbus2", TYPE_CAN_BUS,
+                             (Object **)&s->canbus2,
                              object_property_allow_set_link,
                              0);
 }
