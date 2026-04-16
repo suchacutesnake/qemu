@@ -409,10 +409,19 @@ static void flexcan_update_irq(FslFlexCANState *s)
 static void flexcan_sync_mcr_state(FslFlexCANState *s)
 {
     if (s->mcr & MCR_MDIS) {
+        /*
+         * The S32 SDK FlexCAN helpers drive MDIS directly and poll LPMACK
+         * during disable/enable sequencing. Model low-power acknowledge here
+         * so those waits complete before the controller is reconfigured.
+         */
+        s->mcr |= MCR_LPMACK;
         s->mcr |= MCR_NOTRDY | MCR_HALT;
         s->mcr &= ~MCR_FRZACK;
         return;
     }
+
+    /* Leaving module-disable clears low-power acknowledge before FRZ/HALT. */
+    s->mcr &= ~MCR_LPMACK;
 
     if ((s->mcr & MCR_FRZ) && (s->mcr & MCR_HALT)) {
         s->mcr |= MCR_FRZACK | MCR_NOTRDY;
